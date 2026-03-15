@@ -1,166 +1,166 @@
-// api.js — All communication with Google Apps Script backend
+// api.js — GitHub-backed data store
+// Reads/writes prompts.json in your GitHub repo via the Contents API.
 
-const SCRIPT_URL_KEY = 'pb_script_url';
-const OPENAI_KEY_KEY = 'pb_openai_key';
+const KEYS = {
+  owner:  'pb_gh_owner',
+  repo:   'pb_gh_repo',
+  pat:    'pb_gh_pat',
+  branch: 'pb_gh_branch',
+  openai: 'pb_openai_key',
+};
 
-// When app is served FROM Apps Script, we inject the API URL so fetch works (iframe/sandbox can have different origin)
-export const isEmbedded = () =>
-  typeof window !== 'undefined' && window.__PROMPT_BANK_API_URL__ && window.__PROMPT_BANK_API_URL__ !== '__INJECT_SCRIPT_URL__';
+const PROMPTS_FILE = 'prompts.json';
+const GH_API = 'https://api.github.com';
 
-const hasAppsScriptBridge = () =>
-  typeof window !== 'undefined' &&
-  !!window.google &&
-  !!window.google.script &&
-  !!window.google.script.run;
+// ── Config helpers ────────────────────────────────────────────
 
-function getBaseUrl() {
-  if (typeof window !== 'undefined' && window.location) {
-    const loc = window.location;
-    const injected = window.__PROMPT_BANK_API_URL__;
-    const onAppsScriptHost = loc.hostname.includes('script.googleusercontent.com') || loc.hostname.includes('script.google.com');
+export function getGitHubConfig() {
+  return {
+    owner:  localStorage.getItem(KEYS.owner)  || '',
+    repo:   localStorage.getItem(KEYS.repo)   || '',
+    pat:    localStorage.getItem(KEYS.pat)    || '',
+    branch: localStorage.getItem(KEYS.branch) || 'main',
+  };
+}
 
-    // In embedded HTMLService pages, keep full URL (including required query tokens)
-    // and call same-origin to avoid CORS+credentials issues.
-    if (onAppsScriptHost) {
-      return loc.href.split('#')[0];
-    }
+export function setGitHubConfig({ owner, repo, pat, branch }) {
+  localStorage.setItem(KEYS.owner,  owner);
+  localStorage.setItem(KEYS.repo,   repo);
+  localStorage.setItem(KEYS.pat,    pat);
+  localStorage.setItem(KEYS.branch, branch || 'main');
+}
 
-    if (injected && injected !== '__INJECT_SCRIPT_URL__') return injected;
+export const getOpenAIKey = () => localStorage.getItem(KEYS.openai) || '';
+export const setOpenAIKey = (key) => localStorage.setItem(KEYS.openai, key);
+
+// ── GitHub API internals ──────────────────────────────────────
+
+function ghHeaders(pat) {
+  const h = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  if (pat) h.Authorization = `Bearer ${pat}`;
+  return h;
+}
+
+function encodeContent(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  bytes.forEach(b => (binary += String.fromCharCode(b)));
+  return btoa(binary);
+}
+
+function decodeContent(b64) {
+  const binary = atob(b64.replace(/\n/g, ''));
+  const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+async function readFile() {
+  const { owner, repo, pat, branch } = getGitHubConfig();
+  if (!owner || !repo) throw new Error('GitHub repo not configured. Go to Settings.');
+
+  const res = await fetch(
+    `${GH_API}/repos/${owner}/${repo}/contents/${PROMPTS_FILE}?ref=${branch}`,
+    { headers: ghHeaders(pat) }
+  );
+
+  if (res.status === 404) return { prompts: [], sha: null };
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `GitHub API error: ${res.status}`);
   }
-  return localStorage.getItem(SCRIPT_URL_KEY) || '';
+
+  const data = await res.json();
+  const parsed = JSON.parse(decodeContent(data.content));
+  return {
+    prompts: Array.isArray(parsed) ? parsed : (parsed.prompts || []),
+    sha: data.sha,
+  };
 }
 
-export const getScriptUrl = () => getBaseUrl();
-export const setScriptUrl = (url) => localStorage.setItem(SCRIPT_URL_KEY, url);
-export const getOpenAIKey = () => localStorage.getItem(OPENAI_KEY_KEY) || '';
-export const setOpenAIKey = (key) => localStorage.setItem(OPENAI_KEY_KEY, key);
+async function writeFile(prompts, sha, message = 'Update prompts') {
+  const { owner, repo, pat, branch } = getGitHubConfig();
+  if (!pat) throw new Error('GitHub PAT required for write operations. Go to Settings.');
 
-// Use proxy to avoid CORS (works in both dev and Vercel production).
-// Only skip proxy when embedded in Apps Script or user explicitly chose direct.
-const DIRECT_KEY = 'pb_direct_connection';
-export const getDirectConnection = () => localStorage.getItem(DIRECT_KEY) === 'true';
-export const setDirectConnection = (v) => localStorage.setItem(DIRECT_KEY, v ? 'true' : '');
-const useProxy = () => !isEmbedded() && !getDirectConnection();
+  const body = {
+    message,
+    content: encodeContent(JSON.stringify(prompts, null, 2)),
+    branch,
+  };
+  if (sha) body.sha = sha;
 
-function throwIfHtml(text, context) {
-    const t = (text || '').trim();
-    const lower = t.toLowerCase();
-    if (t.startsWith('<') && (lower.includes('<!doctype') || lower.includes('<html') || lower.includes('<body'))) {
-        throw new Error(
-      "Use the embedded option: run npm run build:embed, paste the app into Apps Script (see README). Then open your Web App URL — works with 'Within my org'."
-    );
+  const res = await fetch(
+    `${GH_API}/repos/${owner}/${repo}/contents/${PROMPTS_FILE}`,
+    {
+      method: 'PUT',
+      headers: { ...ghHeaders(pat), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `GitHub API write error: ${res.status}`);
+  }
+  return res.json();
 }
 
-function gasRun(action, payload = {}) {
-    return new Promise((resolve, reject) => {
-        if (!hasAppsScriptBridge()) {
-            reject(new Error('Apps Script bridge is not available.'));
-            return;
-        }
-        window.google.script.run
-            .withSuccessHandler((result) => {
-                if (result && result.error) {
-                    reject(new Error(result.error));
-                    return;
-                }
-                resolve(result);
-            })
-            .withFailureHandler((err) => {
-                reject(new Error(err && err.message ? err.message : String(err)));
-            })
-            .apiAction(action, payload);
-    });
-}
+// ── Public API ────────────────────────────────────────────────
 
-function buildUrl(base, params = {}) {
-    const url = new URL(base, typeof window !== 'undefined' ? window.location.origin : undefined);
-    Object.entries(params).forEach(([k, v]) => {
-        if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
-    });
-    return url.toString();
-}
-
-// ── Gas API helpers ──────────────────────────────────────────
-
-async function gasGet(params = {}) {
-    if (hasAppsScriptBridge() && params.action) {
-        return gasRun(params.action, params);
-    }
-    const base = getBaseUrl();
-    if (!base) throw new Error('Apps Script URL not configured. Go to Settings.');
-    const useProxyNow = useProxy();
-    const target = useProxyNow
-        ? `/api/proxy?scriptUrl=${encodeURIComponent(base)}&${new URLSearchParams({ ...params }).toString()}`
-        : buildUrl(base, params);
-    const res = await fetch(target, useProxyNow ? {} : { credentials: 'include' });
-    const text = await res.text();
-    throwIfHtml(text);
-    if (!res.ok) throw new Error(`API error: ${res.status}`);
-    try {
-        return JSON.parse(text);
-    } catch {
-        throw new Error('Received non-JSON response from Apps Script. Make sure your Web App URL is the deployed /exec URL.');
-    }
-}
-
-async function gasPost(body = {}) {
-    if (hasAppsScriptBridge() && body.action) {
-        return gasRun(body.action, body);
-    }
-    const base = getBaseUrl();
-    if (!base) throw new Error('Apps Script URL not configured. Go to Settings.');
-    const useProxyNow = useProxy();
-    const target = useProxyNow ? `/api/proxy?scriptUrl=${encodeURIComponent(base)}` : buildUrl(base);
-    const res = await fetch(target, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        ...(useProxyNow ? {} : { credentials: 'include' }),
-    });
-    const text = await res.text();
-    throwIfHtml(text);
-    if (!res.ok) throw new Error(`API error: ${res.status}`);
-    try {
-        return JSON.parse(text);
-    } catch {
-        throw new Error('Received non-JSON response from Apps Script. Make sure your Web App URL is the deployed /exec URL.');
-    }
-}
-
-// ── Public API ───────────────────────────────────────────────
-
-/** Fetch all prompts */
 export async function fetchPrompts() {
-    return gasGet({ action: 'getAll' });
+  const { prompts } = await readFile();
+  return prompts;
 }
 
-/** Search prompts by query string (similarity done server-side) */
 export async function searchPrompts(query) {
-    return gasGet({ action: 'search', query });
+  const prompts = await fetchPrompts();
+  const q = query.toLowerCase();
+  return prompts.filter(p =>
+    p.text?.toLowerCase().includes(q) ||
+    p.category?.toLowerCase().includes(q) ||
+    p.abuseArea?.toLowerCase().includes(q)
+  );
 }
 
-/** Add new prompts (batch) */
-export async function addPrompts(prompts) {
-    return gasPost({ action: 'addPrompts', prompts });
+export async function addPrompts(newPrompts) {
+  const { prompts, sha } = await readFile();
+  const updated = [...prompts, ...newPrompts];
+  await writeFile(updated, sha, `Add ${newPrompts.length} prompt(s)`);
+  return updated;
 }
 
-/** Update a single prompt's rating */
 export async function updateRating(id, rating) {
-    return gasPost({ action: 'updateRating', id, rating });
+  const { prompts, sha } = await readFile();
+  const updated = prompts.map(p => p.id === id ? { ...p, rating } : p);
+  await writeFile(updated, sha, `Update rating for prompt ${id}`);
+  return updated;
 }
 
-/** Delete a prompt by id */
 export async function deletePrompt(id) {
-    return gasPost({ action: 'deletePrompt', id });
+  const { prompts, sha } = await readFile();
+  const updated = prompts.filter(p => p.id !== id);
+  await writeFile(updated, sha, `Delete prompt ${id}`);
+  return updated;
 }
 
-/** Classify prompts via OpenAI (server-side in Apps Script) */
-export async function classifyPrompts(prompts) {
-    return gasPost({ action: 'classify', prompts });
-}
-
-/** Test connection */
 export async function testConnection() {
-    return gasGet({ action: 'ping' });
+  const { owner, repo, pat } = getGitHubConfig();
+  if (!owner || !repo) throw new Error('GitHub owner and repo are required.');
+
+  const res = await fetch(`${GH_API}/repos/${owner}/${repo}`, {
+    headers: ghHeaders(pat),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `Cannot access repo: ${res.status}`);
+  }
+  return { status: 'ok', message: 'pong' };
+}
+
+export async function classifyPrompts(prompts) {
+  return prompts;
 }

@@ -6,7 +6,7 @@ import PromptBank from './components/PromptBank';
 import Search from './components/Search';
 import Upload from './components/Upload';
 import Settings from './components/Settings';
-import { fetchPrompts, getScriptUrl } from './api';
+import { fetchPrompts, getGitHubConfig } from './api';
 
 // ── Toast Context ─────────────────────────────────────────
 export const ToastContext = createContext(null);
@@ -46,8 +46,8 @@ export default function App() {
 
   // ── Load prompts ──────────────────────────────────────
   const loadPrompts = useCallback(async () => {
-    const url = getScriptUrl();
-    if (!url) return;
+    const { owner, repo } = getGitHubConfig();
+    if (!owner || !repo) return;
     setLoading(true);
     try {
       const data = await fetchPrompts();

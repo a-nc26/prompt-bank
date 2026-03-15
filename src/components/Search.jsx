@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { usePrompts, useToast } from '../App';
-import { searchPrompts, getOpenAIKey } from '../api';
+import { getOpenAIKey } from '../api';
 import { categoryColor, ratingColor, scoreLabel, normalizeConversation, isMultiTurnPrompt } from '../utils';
 
 // ── Embedding helpers ─────────────────────────────────────────
@@ -102,19 +102,12 @@ export default function Search() {
         setLoadingMsg('Searching…');
 
         const apiKey = getOpenAIKey();
-        const scriptUrl = localStorage.getItem('pb_script_url');
 
         try {
             if (apiKey) {
                 const data = await semanticSearch(query);
                 setResults(data);
                 setSearchMode('semantic');
-            } else if (scriptUrl) {
-                let data = await searchPrompts(query);
-                data = Array.isArray(data) ? data : data.results || [];
-                setResults(data);
-                setSearchMode('keyword');
-                addToast('Add an OpenAI key in Settings for semantic search', 'info', '💡');
             } else {
                 const data = keywordSearch(query);
                 setResults(data);

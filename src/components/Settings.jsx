@@ -1,42 +1,42 @@
 import React, { useState, useEffect } from 'react';
-import { getScriptUrl, setScriptUrl, getOpenAIKey, setOpenAIKey, getDirectConnection, setDirectConnection, testConnection } from '../api';
+import { getGitHubConfig, setGitHubConfig, getOpenAIKey, setOpenAIKey, testConnection } from '../api';
 import { useToast } from '../App';
 
 export default function Settings({ onSaved }) {
-    const [url, setUrl] = useState('');
-    const [key, setKey] = useState('');
-    const [direct, setDirect] = useState(false);
+    const [owner, setOwner] = useState('');
+    const [repo, setRepo] = useState('');
+    const [pat, setPat] = useState('');
+    const [branch, setBranch] = useState('main');
+    const [openaiKey, setOpenaiKey] = useState('');
     const [testing, setTesting] = useState(false);
     const addToast = useToast();
 
     useEffect(() => {
-        setUrl(getScriptUrl());
-        setKey(getOpenAIKey());
-        setDirect(getDirectConnection());
+        const cfg = getGitHubConfig();
+        setOwner(cfg.owner);
+        setRepo(cfg.repo);
+        setPat(cfg.pat);
+        setBranch(cfg.branch);
+        setOpenaiKey(getOpenAIKey());
     }, []);
 
-    async function handleSave(e) {
+    function handleSave(e) {
         e.preventDefault();
-        setScriptUrl(url);
-        setOpenAIKey(key);
-        setDirectConnection(direct);
-        addToast('Settings saved to local storage', 'success', '💾');
+        setGitHubConfig({ owner, repo, pat, branch });
+        setOpenAIKey(openaiKey);
+        addToast('Settings saved', 'success', '💾');
         if (onSaved) onSaved();
     }
 
     async function handleTest() {
-        if (!url) {
-            addToast('Please enter a Script URL first', 'warn', '⚠️');
+        if (!owner || !repo) {
+            addToast('Please enter a GitHub owner and repo first', 'warn', '⚠️');
             return;
         }
         setTesting(true);
         try {
-            const res = await testConnection();
-            if (res.status === 'ok' || res.message === 'pong') {
-                addToast('Connection successful!', 'success', '✅');
-            } else {
-                addToast('Unexpected response from script', 'warn', '❓');
-            }
+            await testConnection();
+            addToast('Connected to repo successfully!', 'success', '✅');
         } catch (e) {
             addToast('Connection failed: ' + e.message, 'error', '❌');
         } finally {
@@ -48,49 +48,65 @@ export default function Settings({ onSaved }) {
         <div className="page" id="settings-page">
             <div className="page-header">
                 <h2>Settings</h2>
-                <p>Configure your connection to the Google Sheets backend</p>
+                <p>Connect to your GitHub repository — prompts are stored as <code>prompts.json</code> in the repo</p>
             </div>
 
             <div className="card" style={{ maxWidth: 640 }}>
                 <form onSubmit={handleSave}>
-                    <div className="form-group">
-                        <label className="form-label" htmlFor="script-url">Google Apps Script URL</label>
-                        <input
-                            id="script-url"
-                            className="form-input"
-                            type="url"
-                            placeholder="https://script.google.com/macros/s/.../exec"
-                            value={url}
-                            onChange={e => setUrl(e.target.value)}
-                            required
-                        />
-                        <p className="form-help">
-                            The "Web App" URL from your Apps Script project. Must end with <code>/exec</code> (not /dev).
-                        </p>
-                        {url && (
-                            <p className="form-help" style={{ marginTop: 4 }}>
-                                <a href={url + (url.includes('?') ? '&' : '?') + 'action=ping'} target="_blank" rel="noopener noreferrer">
-                                    Open URL in new tab
-                                </a>
-                                {' '}— you should see {"{ \"status\": \"ok\", \"message\": \"pong\" }"}. If you see "Failed to fetch", check the URL or open the app in the same browser where you’re logged into Google (for "Only myself" deployments).
-                            </p>
-                        )}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                        <div className="form-group">
+                            <label className="form-label" htmlFor="gh-owner">GitHub Owner</label>
+                            <input
+                                id="gh-owner"
+                                className="form-input"
+                                type="text"
+                                placeholder="username or org"
+                                value={owner}
+                                onChange={e => setOwner(e.target.value)}
+                                required
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label" htmlFor="gh-repo">Repository</label>
+                            <input
+                                id="gh-repo"
+                                className="form-input"
+                                type="text"
+                                placeholder="prompt-bank"
+                                value={repo}
+                                onChange={e => setRepo(e.target.value)}
+                                required
+                            />
+                        </div>
                     </div>
 
-                    <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div className="form-group">
+                        <label className="form-label" htmlFor="gh-pat">Personal Access Token</label>
                         <input
-                            id="direct-connection"
-                            type="checkbox"
-                            checked={direct}
-                            onChange={e => setDirect(e.target.checked)}
+                            id="gh-pat"
+                            className="form-input"
+                            type="password"
+                            placeholder="ghp_..."
+                            value={pat}
+                            onChange={e => setPat(e.target.value)}
                         />
-                        <label className="form-label" htmlFor="direct-connection" style={{ marginBottom: 0 }}>
-                            Direct connection (for &quot;Only myself&quot; — browser sends your Google login; may hit CORS in some browsers)
-                        </label>
+                        <p className="form-help">
+                            Required for write operations (add, edit, delete). Read access to public repos works without a token.
+                            Create a fine-grained PAT with <strong>Contents: Read and write</strong> permission on this repo.
+                        </p>
                     </div>
-                    <p className="form-help" style={{ marginTop: -4, marginBottom: 16 }}>
-                        If you get a login-page error when loading prompts, turn this on, save, and reload the app. Otherwise leave off.
-                    </p>
+
+                    <div className="form-group">
+                        <label className="form-label" htmlFor="gh-branch">Branch</label>
+                        <input
+                            id="gh-branch"
+                            className="form-input"
+                            type="text"
+                            placeholder="main"
+                            value={branch}
+                            onChange={e => setBranch(e.target.value)}
+                        />
+                    </div>
 
                     <div className="form-group">
                         <label className="form-label" htmlFor="openai-key">OpenAI API Key (Optional)</label>
@@ -99,12 +115,10 @@ export default function Settings({ onSaved }) {
                             className="form-input"
                             type="password"
                             placeholder="sk-..."
-                            value={key}
-                            onChange={e => setKey(e.target.value)}
+                            value={openaiKey}
+                            onChange={e => setOpenaiKey(e.target.value)}
                         />
-                        <p className="form-help">
-                            Used for auto-classification and embeddings if enabled in your script.
-                        </p>
+                        <p className="form-help">Used for semantic (embedding-based) search in the Search page.</p>
                     </div>
 
                     <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
@@ -127,12 +141,15 @@ export default function Settings({ onSaved }) {
             <div className="card" style={{ maxWidth: 640, marginTop: 24, border: '1px solid var(--indigo-dim)' }}>
                 <h3 style={{ fontSize: 14, marginBottom: 12, color: 'var(--indigo-light)' }}>Setup Instructions</h3>
                 <ol style={{ fontSize: 13, color: 'var(--text-secondary)', paddingLeft: 20, lineHeight: 1.8 }}>
-                    <li>Create a new Google Sheet.</li>
-                    <li>Go to <strong>Extensions &gt; Apps Script</strong>.</li>
-                    <li>Copy the backend code into the editor.</li>
-                    <li>Click <strong>Deploy &gt; New Deployment</strong>.</li>
-                    <li>Select <strong>Web App</strong>. If your org allows it, set access to <strong>"Anyone"</strong>. Otherwise use <strong>"Only myself"</strong> and stay logged into that Google account in this browser.</li>
-                    <li>Copy the URL and paste it above.</li>
+                    <li>Create a GitHub repository (or use this one).</li>
+                    <li>Make sure <code>prompts.json</code> exists at the root of the repo.</li>
+                    <li>
+                        Create a <strong>fine-grained Personal Access Token</strong> at{' '}
+                        <strong>GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens</strong>.
+                        Set <strong>Repository access</strong> to this repo and grant <strong>Contents: Read and write</strong>.
+                    </li>
+                    <li>Enter the owner, repo name, and PAT above, then click <strong>Save Settings</strong>.</li>
+                    <li>Click <strong>Test Connection</strong> to verify everything works.</li>
                 </ol>
             </div>
         </div>
