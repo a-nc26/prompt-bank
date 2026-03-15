@@ -58,7 +58,7 @@ export function ratingColor(r) {
 }
 
 export function scoreLabel(score) {
-    if (score === undefined || score === null) return null;
+    if (score === undefined || score === null || score === 0) return null;
     if (score === -1) return '-1';
     if (score >= 1) return `x${score}`;
     return String(score);
