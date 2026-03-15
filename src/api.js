@@ -51,33 +51,40 @@ function encodeContent(str) {
   return btoa(binary);
 }
 
-function decodeContent(b64) {
-  const binary = atob(b64.replace(/\n/g, ''));
-  const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+
+async function getFileSha() {
+  // Returns the current SHA needed for write operations
+  const { owner, repo, pat, branch } = getGitHubConfig();
+  const res = await fetch(
+    `${GH_API}/repos/${owner}/${repo}/contents/${PROMPTS_FILE}?ref=${branch}`,
+    { headers: ghHeaders(pat) }
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.sha || null;
 }
 
 async function readFile() {
   const { owner, repo, pat, branch } = getGitHubConfig();
   if (!owner || !repo) throw new Error('GitHub repo not configured. Go to Settings.');
 
-  const res = await fetch(
-    `${GH_API}/repos/${owner}/${repo}/contents/${PROMPTS_FILE}?ref=${branch}`,
-    { headers: ghHeaders(pat) }
-  );
+  // Use raw.githubusercontent.com for reads — no base64, no size limits, no auth needed for public repos
+  const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${PROMPTS_FILE}`;
+  const headers = {};
+  if (pat) headers.Authorization = `Bearer ${pat}`;
+
+  const res = await fetch(rawUrl, { headers });
 
   if (res.status === 404) return { prompts: [], sha: null };
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || `GitHub API error: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`Could not load prompts (${res.status}). Check Settings.`);
 
-  const data = await res.json();
-  const parsed = JSON.parse(decodeContent(data.content));
+  const parsed = await res.json();
+  const sha = await getFileSha();
   return {
     prompts: Array.isArray(parsed) ? parsed : (parsed.prompts || []),
-    sha: data.sha,
+    sha,
   };
 }
 
