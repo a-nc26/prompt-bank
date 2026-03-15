@@ -177,6 +177,7 @@ export default function PromptBank() {
 function PromptCard({ prompt: p, onClick }) {
     const isMulti = isMultiTurnPrompt(p);
     const score = scoreLabel(p.score);
+    const hasResponse = !!(p.conversation && p.conversation !== 'null' && p.conversation !== '');
 
     return (
         <div className="prompt-card" onClick={onClick} id={`prompt-${p.id}`}>
@@ -191,6 +192,7 @@ function PromptCard({ prompt: p, onClick }) {
                     <span className={`badge ${isMulti ? 'multi' : 'single'}`}>
                         {isMulti ? '↻ Multi-turn' : '↱ Single-turn'}
                     </span>
+                    {hasResponse && <span className="badge" style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }}>↳ Has response</span>}
                     {score && <span className="score-badge">{score}</span>}
                 </div>
             </div>
