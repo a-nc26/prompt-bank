@@ -16,8 +16,8 @@ const GH_API = 'https://api.github.com';
 
 export function getGitHubConfig() {
   return {
-    owner:  localStorage.getItem(KEYS.owner)  || '',
-    repo:   localStorage.getItem(KEYS.repo)   || '',
+    owner:  localStorage.getItem(KEYS.owner)  || import.meta.env.VITE_GH_OWNER || '',
+    repo:   localStorage.getItem(KEYS.repo)   || import.meta.env.VITE_GH_REPO  || '',
     pat:    localStorage.getItem(KEYS.pat)    || '',
     branch: localStorage.getItem(KEYS.branch) || 'main',
   };
