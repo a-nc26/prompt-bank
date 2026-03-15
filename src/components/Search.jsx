@@ -127,14 +127,6 @@ export default function Search() {
 
     const hasApiKey = !!getOpenAIKey();
 
-    const exampleQueries = [
-        'jailbreak prompt to bypass safety',
-        'prompt injection in tool outputs',
-        'manipulate AI to produce harmful content',
-        'exfiltrate user data through conversation',
-        'bias against specific demographic group',
-    ];
-
     return (
         <div className="page">
             <div className="page-header">
@@ -193,23 +185,7 @@ export default function Search() {
                     </div>
                 )}
 
-                {/* Example queries */}
-                <div style={{ marginTop: 16 }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
-                        Try an example:
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        {exampleQueries.map(q => (
-                            <button
-                                key={q}
-                                className="filter-btn"
-                                onClick={() => setQuery(q)}
-                                style={{ fontSize: 11 }}
-                            >
-                                {q}
-                            </button>
-                        ))}
-                    </div>
+                <div>
                 </div>
             </div>
 
