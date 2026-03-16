@@ -51,25 +51,35 @@ async function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
 }
 
-async function fetchEmbeddingsBatch(texts, apiKey) {
-    const res = await fetch('https://api.openai.com/v1/embeddings', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-            model: 'text-embedding-3-small',
-            input: texts.map(t => t.slice(0, 8000)),
-            dimensions: DIMS,
-        }),
-    });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error?.message || `OpenAI embeddings error: ${res.status}`);
+async function fetchEmbeddingsBatch(texts, apiKey, retries = 3) {
+    let lastErr;
+    for (let attempt = 0; attempt < retries; attempt++) {
+        if (attempt > 0) await sleep(600 * attempt); // 600ms, 1200ms backoff
+        try {
+            const res = await fetch('https://api.openai.com/v1/embeddings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`,
+                },
+                body: JSON.stringify({
+                    model: 'text-embedding-3-small',
+                    input: texts.map(t => t.slice(0, 4000)), // cap at 4k chars per text
+                    dimensions: DIMS,
+                }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error?.message || `OpenAI error: ${res.status}`);
+            }
+            const data = await res.json();
+            return data.data.map(d => d.embedding);
+        } catch (e) {
+            lastErr = e;
+            if (e.message.includes('401') || e.message.includes('invalid')) throw e; // don't retry auth errors
+        }
     }
-    const data = await res.json();
-    return data.data.map(d => d.embedding);
+    throw lastErr;
 }
 
 function cosineSim(a, b) {
@@ -110,7 +120,7 @@ export default function Search() {
         // Embed any prompts not yet in the cache (batched, 50 at a time with delays)
         const toEmbed = prompts.filter(p => !embeddingCache.has(p.id) && p.text?.trim());
         if (toEmbed.length > 0) {
-            const BATCH = 50;
+            const BATCH = 20;
             const total = toEmbed.length;
             for (let i = 0; i < total; i += BATCH) {
                 setLoadingMsg(`Embedding prompts… (${Math.min(i + BATCH, total)}/${total})`);
@@ -182,7 +192,10 @@ export default function Search() {
             const data = keywordSearch(query);
             setResults(data);
             setSearchMode('keyword');
-            addToast('Semantic search failed, falling back to keyword: ' + err.message, 'warn', '⚠️');
+            const msg = err.message === 'Failed to fetch'
+                ? 'Cannot reach api.openai.com — check if a browser extension is blocking it'
+                : err.message;
+            addToast('Semantic search failed, falling back to keyword: ' + msg, 'warn', '⚠️');
         } finally {
             setLoading(false);
             setLoadingMsg('Searching…');
