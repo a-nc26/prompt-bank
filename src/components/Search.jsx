@@ -8,9 +8,9 @@ import { categoryColor, ratingColor, scoreLabel, normalizeConversation, isMultiT
 // Module-level cache (session). Also persisted to localStorage across page loads.
 const embeddingCache = new Map(); // prompt id → number[]
 
-const LS_KEY = 'pb_embeddings_v1';
-const LS_META_KEY = 'pb_embeddings_meta_v1';
-const DIMS = 256; // reduced dims → ~4x smaller, sufficient for similarity
+const LS_KEY = 'pb_embeddings_v2';
+const LS_META_KEY = 'pb_embeddings_meta_v2';
+const DIMS = 512; // good quality/size tradeoff (~3MB for 750 prompts)
 
 function loadCacheFromStorage() {
     try {
@@ -115,7 +115,15 @@ export default function Search() {
             for (let i = 0; i < total; i += BATCH) {
                 setLoadingMsg(`Embedding prompts… (${Math.min(i + BATCH, total)}/${total})`);
                 const chunk = toEmbed.slice(i, i + BATCH);
-                const vectors = await fetchEmbeddingsBatch(chunk.map(p => p.text), apiKey);
+                // Include abuse area + category so conceptual queries match even when
+                // those words don't appear literally in the prompt text
+                const texts = chunk.map(p => {
+                    const parts = [p.text];
+                    if (p.abuseArea) parts.push(`Abuse area: ${p.abuseArea}`);
+                    if (p.category) parts.push(`Category: ${p.category}`);
+                    return parts.join('\n');
+                });
+                const vectors = await fetchEmbeddingsBatch(texts, apiKey);
                 chunk.forEach((p, idx) => embeddingCache.set(p.id, vectors[idx]));
                 // Throttle: wait 300ms between batches to avoid rate limits
                 if (i + BATCH < total) await sleep(300);
@@ -130,7 +138,7 @@ export default function Search() {
         return prompts
             .filter(p => embeddingCache.has(p.id))
             .map(p => ({ ...p, similarity: cosineSim(queryVec, embeddingCache.get(p.id)) }))
-            .filter(p => p.similarity >= 0.25)
+            .filter(p => p.similarity >= 0.20)
             .sort((a, b) => b.similarity - a.similarity)
             .slice(0, 20);
     }
