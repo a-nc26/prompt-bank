@@ -5,8 +5,51 @@ import { categoryColor, ratingColor, scoreLabel, normalizeConversation, isMultiT
 
 // ── Embedding helpers ─────────────────────────────────────────
 
-// Module-level cache so embeddings persist across navigations in the same session
-const embeddingCache = new Map(); // prompt id → Float32Array
+// Module-level cache (session). Also persisted to localStorage across page loads.
+const embeddingCache = new Map(); // prompt id → number[]
+
+const LS_KEY = 'pb_embeddings_v1';
+const LS_META_KEY = 'pb_embeddings_meta_v1';
+const DIMS = 256; // reduced dims → ~4x smaller, sufficient for similarity
+
+function loadCacheFromStorage() {
+    try {
+        const meta = JSON.parse(localStorage.getItem(LS_META_KEY) || 'null');
+        if (!meta) return null;
+        const raw = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+        if (!raw) return null;
+        // raw is { id: Float32Array-as-array }
+        for (const [id, vec] of Object.entries(raw)) {
+            embeddingCache.set(id, vec);
+        }
+        return meta; // { promptCount, savedAt }
+    } catch {
+        return null;
+    }
+}
+
+function saveCacheToStorage(promptCount) {
+    try {
+        const obj = {};
+        for (const [id, vec] of embeddingCache.entries()) {
+            obj[id] = vec;
+        }
+        localStorage.setItem(LS_KEY, JSON.stringify(obj));
+        localStorage.setItem(LS_META_KEY, JSON.stringify({ promptCount, savedAt: Date.now() }));
+    } catch {
+        // localStorage quota exceeded — ignore, in-memory cache still works
+    }
+}
+
+function clearEmbeddingStorage() {
+    localStorage.removeItem(LS_KEY);
+    localStorage.removeItem(LS_META_KEY);
+    embeddingCache.clear();
+}
+
+async function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+}
 
 async function fetchEmbeddingsBatch(texts, apiKey) {
     const res = await fetch('https://api.openai.com/v1/embeddings', {
@@ -18,6 +61,7 @@ async function fetchEmbeddingsBatch(texts, apiKey) {
         body: JSON.stringify({
             model: 'text-embedding-3-small',
             input: texts.map(t => t.slice(0, 8000)),
+            dimensions: DIMS,
         }),
     });
     if (!res.ok) {
@@ -55,16 +99,28 @@ export default function Search() {
     async function semanticSearch(q) {
         const apiKey = getOpenAIKey();
 
-        // Embed any prompts not yet in the cache (batched, 100 at a time)
+        // Load persisted cache on first run (idempotent — already-set keys are skipped)
+        const meta = loadCacheFromStorage();
+        const cacheValid = meta && meta.promptCount === prompts.length;
+        if (!cacheValid && meta) {
+            // Prompt set changed — clear stale embeddings
+            clearEmbeddingStorage();
+        }
+
+        // Embed any prompts not yet in the cache (batched, 50 at a time with delays)
         const toEmbed = prompts.filter(p => !embeddingCache.has(p.id) && p.text?.trim());
         if (toEmbed.length > 0) {
-            setLoadingMsg(`Embedding ${toEmbed.length} prompts…`);
-            const BATCH = 100;
-            for (let i = 0; i < toEmbed.length; i += BATCH) {
+            const BATCH = 50;
+            const total = toEmbed.length;
+            for (let i = 0; i < total; i += BATCH) {
+                setLoadingMsg(`Embedding prompts… (${Math.min(i + BATCH, total)}/${total})`);
                 const chunk = toEmbed.slice(i, i + BATCH);
                 const vectors = await fetchEmbeddingsBatch(chunk.map(p => p.text), apiKey);
                 chunk.forEach((p, idx) => embeddingCache.set(p.id, vectors[idx]));
+                // Throttle: wait 300ms between batches to avoid rate limits
+                if (i + BATCH < total) await sleep(300);
             }
+            saveCacheToStorage(prompts.length);
         }
 
         // Embed the query
