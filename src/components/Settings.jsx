@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getGitHubConfig, setGitHubConfig, getOpenAIKey, setOpenAIKey, testConnection } from '../api';
+import { getGitHubConfig, setGitHubConfig, getOpenAIKey, setOpenAIKey, getEmbedProxyUrl, setEmbedProxyUrl, testConnection } from '../api';
 import { useToast } from '../App';
 
 export default function Settings({ onSaved }) {
@@ -8,6 +8,7 @@ export default function Settings({ onSaved }) {
     const [pat, setPat] = useState('');
     const [branch, setBranch] = useState('main');
     const [openaiKey, setOpenaiKey] = useState('');
+    const [embedProxy, setEmbedProxy] = useState('');
     const [testing, setTesting] = useState(false);
     const addToast = useToast();
 
@@ -18,12 +19,14 @@ export default function Settings({ onSaved }) {
         setPat(cfg.pat);
         setBranch(cfg.branch);
         setOpenaiKey(getOpenAIKey());
+        setEmbedProxy(getEmbedProxyUrl());
     }, []);
 
     function handleSave(e) {
         e.preventDefault();
         setGitHubConfig({ owner, repo, pat, branch });
         setOpenAIKey(openaiKey);
+        setEmbedProxyUrl(embedProxy);
         addToast('Settings saved', 'success', '💾');
         if (onSaved) onSaved();
     }
@@ -109,7 +112,7 @@ export default function Settings({ onSaved }) {
                     </div>
 
                     <div className="form-group">
-                        <label className="form-label" htmlFor="openai-key">OpenAI API Key (Optional)</label>
+                        <label className="form-label" htmlFor="openai-key">OpenAI API Key</label>
                         <input
                             id="openai-key"
                             className="form-input"
@@ -118,7 +121,22 @@ export default function Settings({ onSaved }) {
                             value={openaiKey}
                             onChange={e => setOpenaiKey(e.target.value)}
                         />
-                        <p className="form-help">Used for semantic (embedding-based) search in the Search page.</p>
+                        <p className="form-help">Used for semantic search. Each user enters their own key — it stays in your browser only.</p>
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label" htmlFor="embed-proxy">Embed Proxy URL</label>
+                        <input
+                            id="embed-proxy"
+                            className="form-input"
+                            type="text"
+                            placeholder="https://pb-embed.your-name.workers.dev"
+                            value={embedProxy}
+                            onChange={e => setEmbedProxy(e.target.value)}
+                        />
+                        <p className="form-help">
+                            If your network blocks api.openai.com, deploy the Cloudflare Worker in <code>worker/embed.js</code> and paste its URL here. Leave blank to call OpenAI directly.
+                        </p>
                     </div>
 
                     <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>

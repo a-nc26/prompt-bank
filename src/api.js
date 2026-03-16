@@ -7,6 +7,7 @@ const KEYS = {
   pat:    'pb_gh_pat',
   branch: 'pb_gh_branch',
   openai: 'pb_openai_key',
+  proxy:  'pb_embed_proxy',
 };
 
 const PROMPTS_FILE = 'prompts.json';
@@ -32,6 +33,9 @@ export function setGitHubConfig({ owner, repo, pat, branch }) {
 
 export const getOpenAIKey = () => localStorage.getItem(KEYS.openai) || '';
 export const setOpenAIKey = (key) => localStorage.setItem(KEYS.openai, key);
+
+export const getEmbedProxyUrl = () => localStorage.getItem(KEYS.proxy) || import.meta.env.VITE_EMBED_PROXY || '';
+export const setEmbedProxyUrl = (url) => localStorage.setItem(KEYS.proxy, url);
 
 // ── GitHub API internals ──────────────────────────────────────
 

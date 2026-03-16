@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { usePrompts, useToast } from '../App';
-import { getOpenAIKey } from '../api';
+import { getOpenAIKey, getEmbedProxyUrl } from '../api';
 import { categoryColor, ratingColor, scoreLabel, normalizeConversation, isMultiTurnPrompt } from '../utils';
 
 // ── Embedding helpers ─────────────────────────────────────────
@@ -52,11 +52,14 @@ async function sleep(ms) {
 }
 
 async function fetchEmbeddingsBatch(texts, apiKey, retries = 3) {
+    const proxyUrl = getEmbedProxyUrl();
+    const endpoint = proxyUrl || 'https://api.openai.com/v1/embeddings';
+
     let lastErr;
     for (let attempt = 0; attempt < retries; attempt++) {
         if (attempt > 0) await sleep(600 * attempt); // 600ms, 1200ms backoff
         try {
-            const res = await fetch('https://api.openai.com/v1/embeddings', {
+            const res = await fetch(endpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
